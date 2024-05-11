@@ -1,0 +1,465 @@
+#!/usr/bin/env bash
+#
+# Description: Krathalan's Borg Helper: makes managing borg backups and repos
+#              dead simple.
+
+# -----------------------------------------
+# -------------- Guidelines ---------------
+# -----------------------------------------
+
+# This script follows the Google Shell Style Guide:
+# https://google.github.io/styleguide/shell.xml
+
+# This script uses shellcheck: https://www.shellcheck.net/
+
+# See https://vaneyckt.io/posts/safer_bash_scripts_with_set_euxo_pipefail/
+set -Eeuo pipefail
+
+# -----------------------------------------
+# ----------- Program variables -----------
+# -----------------------------------------
+
+# Colors
+GREEN=$(tput bold && tput setaf 2)
+RED=$(tput bold && tput setaf 1)
+WHITE=$(tput sgr0 && tput bold)
+YELLOW=$(tput sgr0 && tput setaf 3)
+NC=$(tput sgr0) # No color/turn off all tput attributes
+
+exit_script_on_failure()
+{
+  printf "%sError%s: %s\n" "${RED}" "${NC}" "$1" >&2
+
+  exit 1
+}
+
+# Script (self) information
+SCRIPT_NAME="${0##*/}"
+
+# Check for config file
+readonly CONFIG_FILE_DIRECTORY="${XDG_CONFIG_HOME:-${HOME}/.config}/krathalan"
+readonly CONFIG_FILE="${CONFIG_FILE_DIRECTORY}/${SCRIPT_NAME}.json"
+
+if [[ ! -f "${CONFIG_FILE}" ]]; then
+  exit_script_on_failure "No configuration file found at ${CONFIG_FILE}"
+fi
+
+# Load settings
+KBH_SETTINGS_JSON="$(<"${CONFIG_FILE}")"
+KBH_REPOS_NUMBER="$(jaq -r ".repos | length" <<< "${KBH_SETTINGS_JSON}")"
+KBH_ARCHIVE_NAME="$(jaq -r .borg_archive_name_command <<< "${KBH_SETTINGS_JSON}")"
+
+if [[ "${KBH_ARCHIVE_NAME}" == "null" ]]; then
+  # Use default archive name
+  KBH_ARCHIVE_NAME="date +%Y-%m-%d-%H%M%S"
+fi
+
+readonly KBH_SETTINGS_JSON KBH_REPOS_NUMBER KBH_ARCHIVE_NAME SCRIPT_NAME GREEN RED WHITE NC
+
+# -----------------------------------------
+# --------------- Functions ---------------
+# -----------------------------------------
+
+check_ssh_key()
+{
+  # Load settings
+  local -r sshKeyPasswordCopyCommand="$(jaq -r .ssh_key_password_copy_command <<< "${KBH_SETTINGS_JSON}")"
+
+  if [[ "${sshKeyPasswordCopyCommand}" == "null" ]]; then
+    return
+  fi
+
+  if ! ssh-add -L &> /dev/null; then
+    print_script_message "You need to add your ssh key. Copying passphrase and initiating adding..."
+    
+    ${sshKeyPasswordCopyCommand}
+
+    ssh-add
+  fi
+}
+
+exit_script_on_failure()
+{
+  printf "%sError%s: %s\n" "${RED}" "${NC}" "$1" >&2
+
+  exit 1
+}
+
+print_script_message()
+{
+  printf "%s==>%s %s%s\n" "${GREEN}" "${WHITE}" "$1" "${NC}"
+}
+
+# no arguments
+borg_backup_full()
+{
+  local whileCounter=0
+  local repoName=""
+  local repoPath=""
+  local passwordCommand=""
+  local repoCompression=""
+  local -r archiveName="$(${KBH_ARCHIVE_NAME})"
+
+  mapfile -t backupPaths <<< "$(jaq -r .backup_paths[] <<< "${KBH_SETTINGS_JSON}")"
+
+  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
+    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
+    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
+    repoCompression="$(jaq -r .repos[${whileCounter}].compression <<< "${KBH_SETTINGS_JSON}")"
+
+    if [[ "${repoCompression}" == "null" ]]; then
+      # Use default borg compression
+      repoCompression="lz4"
+    fi
+    
+    print_script_message "Backing up files to ${repoName}..."
+    printf "Running command: borg create --compression %s --stats --progress %s::%s %s\n\n" "${repoCompression}" "${repoPath}" "${archiveName}" "${backupPaths[*]}"
+
+    BORG_PASSPHRASE="$(${passwordCommand})" borg create --compression "${repoCompression}" --stats --progress "${repoPath}"::"${archiveName}" "${backupPaths[@]}"
+
+    printf "\n"
+
+    whileCounter="$(( whileCounter + 1 ))"
+  done
+}
+
+# no arguments
+prune_all()
+{
+  printf "%s==> Removing all archives on all repos not within the last day in 15 seconds.\n%sPress CTRL+C to cancel.%s\n" "${RED}" "${NC}" "${WHITE}"
+  
+  local whileCounter=0
+  while [[ "${whileCounter}" -lt 15 ]]; do
+    sleep 1
+    printf "."
+    whileCounter="$(( whileCounter + 1 ))"
+  done
+
+  printf "%s" "${NC}"
+
+  whileCounter=0
+  local repoName=""
+  local repoPath=""
+  local passwordCommand=""
+
+  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
+    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
+    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
+    
+    print_script_message "Pruning archives on ${repoName}..."
+
+    BORG_PASSPHRASE="$(${passwordCommand})" borg prune -v --list --keep-within=1d "${repoPath}"
+
+    whileCounter="$(( whileCounter + 1 ))"
+  done
+}
+
+# $1: repo (optional)
+repo_info()
+{
+  shift
+
+  local repoName=""
+  local repoPath=""
+  local passwordCommand=""
+  local whileCounter=0
+
+  # If no argument, list repo info for all repos.
+  if [[ $# == 0 ]]; then
+    print_script_message "Listing repo info."
+
+    while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+      repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
+      repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
+      passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
+      
+      print_script_message "Repo info on ${repoName}..."
+
+      BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}"
+
+      whileCounter="$(( whileCounter + 1 ))"
+      printf "\n"
+    done
+
+    return
+  fi
+
+  # If argument given, list specific repo info.
+  local repoData
+  repoData="$(jaq -r ".repos[] | select(.name==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
+
+  # Attempt to match repo from alternative names
+  if [[ -z "${repoData:-}" ]]; then
+    repoData="$(jaq -r ".repos[] | select(.alternative_names[]==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
+  fi
+
+  if [[ -z "${repoData:-}" ]]; then
+    exit_script_on_failure "Could not locate repo with name or alternative name \"$1\""
+  fi
+
+  repoName="$(jaq -r .name <<< "${repoData}")"
+  repoPath="$(jaq -r .path <<< "${repoData}")"
+  passwordCommand="$(jaq -r .password_command <<< "${repoData}")"
+
+  print_script_message "Repo info on ${repoName}..."
+  BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}"
+}
+
+# $1: repo (optional)
+list_repo_archives()
+{
+  shift
+
+  local repoName=""
+  local repoPath=""
+  local passwordCommand=""
+  local whileCounter=0
+
+  # If no argument, list repo archives for all repos.
+  if [[ $# == 0 ]]; then
+    print_script_message "Listing repo archives."
+
+    while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+      repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
+      repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
+      passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
+      
+      print_script_message "Repo archives on ${repoName}..."
+
+      BORG_PASSPHRASE="$(${passwordCommand})" borg list "${repoPath}"
+
+      whileCounter="$(( whileCounter + 1 ))"
+      printf "\n"
+    done
+
+    return
+  fi
+
+  # If argument given, list specific repo archives.
+  local repoData
+  repoData="$(jaq -r ".repos[] | select(.name==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
+
+  # Attempt to match repo from alternative names
+  if [[ -z "${repoData:-}" ]]; then
+    repoData="$(jaq -r ".repos[] | select(.alternative_names[]==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
+  fi
+
+  if [[ -z "${repoData:-}" ]]; then
+    exit_script_on_failure "Could not locate repo with name or alternative name \"$1\""
+  fi
+
+  repoName="$(jaq -r .name <<< "${repoData}")"
+  repoPath="$(jaq -r .path <<< "${repoData}")"
+  passwordCommand="$(jaq -r .password_command <<< "${repoData}")"
+
+  print_script_message "Repo archives on ${repoName}..."
+  BORG_PASSPHRASE="$(${passwordCommand})" borg list "${repoPath}"
+}
+
+# no arguments
+init_repos()
+{
+  local repoName=""
+  local repoPath=""
+  local passwordCommand=""
+  local whileCounter=0
+
+  print_script_message "Creating borg repositories..."
+
+  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
+    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
+    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
+    
+    # Test if repo already present; if so, skip
+    if BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}" &> /dev/null; then
+      printf "%sBorg repo already present at %s%s%s for repo %s%s%s\n" "${YELLOW}" "${NC}" "${repoPath}" "${YELLOW}" "${WHITE}" "${repoName}" "${NC}"
+      whileCounter="$(( whileCounter + 1 ))"
+
+      continue
+    fi
+
+    print_script_message "Creating borg repo for ${repoName}..."
+    borg init --encryption repokey-blake2 "${repoPath}"
+
+    print_script_message "Printing borg key from ${repoName}:"
+    BORG_PASSPHRASE="$(${passwordCommand})" borg key export "${repoPath}"
+    
+    print_script_message "--------------------------------------------"
+
+    whileCounter="$(( whileCounter + 1 ))"
+    printf "\n"
+  done
+}
+
+# $1: repo
+# $2: archive (optional)
+mount_archive()
+{
+  shift
+
+  if [[ -z "${1:-}" ]]; then
+    exit_script_on_failure "No repository specified, e.g. ${WHITE}kbh mount home-server${NC}"
+  fi
+
+  local -r mountPoint="$(get_mount_point)"
+
+  # Ensure mount point exists
+  if [[ ! -d "${mountPoint}" ]]; then
+    exit_script_on_failure "Mount point ${WHITE}${mountPoint}${NC} directory does not exist"
+  fi
+
+  # Ensure $mountPoint does not have something mounted on it already
+  if mountpoint "${mountPoint}" &> /dev/null; then
+    exit_script_on_failure "${mountPoint} already has something mounted on it"
+  fi
+
+  # Find repo data for specified repo
+  local repoData
+  repoData="$(jaq -r ".repos[] | select(.name==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
+
+  # Attempt to match repo from alternative names
+  if [[ -z "${repoData:-}" ]]; then
+    repoData="$(jaq -r ".repos[] | select(.alternative_names[]==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
+  fi
+
+  if [[ -z "${repoData:-}" ]]; then
+    exit_script_on_failure "Could not locate repo with name or alternative name \"$1\""
+  fi
+
+  # If no archive specified, mount repo
+  if [[ -z "${2:-}" ]]; then
+    BORG_PASSCOMMAND="$(jaq -r .password_command <<< "${repoData}")" borg mount "$(jaq -r .path <<< "${repoData}")" "${mountPoint}"
+  else
+    # If archive specified, mount archive
+    BORG_PASSCOMMAND="$(jaq -r .password_command <<< "${repoData}")" borg mount "$(jaq -r .path <<< "${repoData}")"::"$2" "${mountPoint}"
+  fi
+}
+
+print_help()
+{
+  printf "%s" "\
+${SCRIPT_NAME} - Krath's Borg Helper
+
+More detailed usage information, including configuration, flags and override variables, is found in the man page.
+
+=> help|-h|--help                                 - show this help
+=> backup|--backup                                - backs up all backup directories to all repos
+=> info|repo-info|--info|--repo-info              - lists borg repos general information
+=> list|list-archives|-l|--list|--list-archives   - lists archives from borg repos
+=> init|init-repos|--init|--init-repos            - creates borg repos
+=> mount|mount-archive|-m|--mount|--mount-archive - mounts repo or archive from specified repo onto /mnt/borg
+                                          usage: ${SCRIPT_NAME} mount \${repo/host} \${optional archive name}
+                                          e.g.   ${SCRIPT_NAME} mount alpha May-02-2024-14-23-22
+=> prune|prune-all|-p|--prune|--prune-all         - removes all archives older than 1 day from
+                                                    all borg repos
+"
+
+  exit 0
+}
+
+# Print config and overall repo info
+print_status()
+{
+  # Print base settings
+  mapfile -t backupPaths <<< "$(jaq -r .backup_paths[] <<< "${KBH_SETTINGS_JSON}")"
+  local -r sshKeyPasswordCopyCommand="$(jaq -r .ssh_key_password_copy_command <<< "${KBH_SETTINGS_JSON}")"
+  local -r borgArchiveNameCommand="$(jaq -r .borg_archive_name_command <<< "${KBH_SETTINGS_JSON}")"
+  local -r mountPoint="$(get_mount_point)"
+
+  print_script_message "Base settings"
+
+  printf "Backup paths:          %s%s%s\n" "${WHITE}" "${backupPaths[*]}" "${NC}"
+  printf "Borg archive name cmd: %s%s (i.e. %s)%s\n" "${WHITE}" "${borgArchiveNameCommand}" "$(${borgArchiveNameCommand})" "${NC}"
+  printf "SSH key pwd copy cmd:  %s%s%s\n" "${WHITE}" "${sshKeyPasswordCopyCommand}" "${NC}"
+  printf "Mount point:           %s%s%s\n\n" "${WHITE}" "${mountPoint}" "${NC}"
+
+  # Print per-repo information
+  local whileCounter=0
+  local repoName=""
+  local repoPath=""
+  local passwordCommand=""
+  local repoCompression=""
+  local borgInfoOutput=""
+  local lastArchive=""
+
+  print_script_message "Repository information"
+
+  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
+    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
+    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
+    repoCompression="$(jaq -r .repos[${whileCounter}].compression <<< "${KBH_SETTINGS_JSON}")"
+
+    if [[ "${repoCompression}" == "null" ]]; then
+      # Use default borg compression
+      repoCompression="lz4 (default)"
+    fi
+
+    # If we can connect to repo, print more info (repo size and last backup info)
+    if ! BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}" &> /dev/null; then
+      printf "%s%s%s (could not connect or find repo)%s\n" "${WHITE}" "${repoName}" "${YELLOW}" "${NC}"
+    else
+      borgInfoOutput="$(BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}")"
+      lastArchive="$(BORG_PASSPHRASE="$(${passwordCommand})" borg list "${repoPath}" | tail -n1 | tr -s " ")"
+
+      printf "%s%s%s (%s %s)\n" "${WHITE}" "${repoName}" "${NC}" "$(printf "%s" "${borgInfoOutput}" | grep 'All archives' | awk '{print $7}')" "$(printf "%s" "${borgInfoOutput}" | grep 'All archives' | awk '{print $8}')"
+      printf "  Last backup: %s\n" "${lastArchive% *}"
+    fi
+
+    printf "  Path:        %s\n" "${repoPath}"
+    printf "  Pwd cmd:     %s\n" "${passwordCommand}"
+    printf "  Compression: %s\n" "${repoCompression}"
+
+    printf "\n"
+
+    whileCounter="$(( whileCounter + 1 ))"
+  done
+}
+
+get_mount_point()
+{
+  local -r mountPointSetting="$(jaq -r .mount_point <<< "${KBH_SETTINGS_JSON}")"
+
+  # Discern where to mount
+  # If KBH_MOUNTPOINT env variable is specified, use that first.
+  # Otherwise use value of .mount_point in conf file.
+  # Otherwise default to /mnt/borg.
+  if [[ -n "${KBH_MOUNTPOINT:-}" ]]; then
+    local -r mountPointOfficial="${KBH_MOUNTPOINT}"
+  elif [[ -n "${mountPointSetting}" ]]; then
+    local -r mountPointOfficial="${mountPointSetting}"
+  else
+    local -r mountPointOfficial="/mnt/borg"
+  fi
+
+  printf "%s" "${mountPointOfficial}"
+}
+
+# -----------------------------------------
+# ---------------- Script -----------------
+# -----------------------------------------
+
+if [[ "$(whoami)" = "root" ]]; then
+  exit_script_on_failure "This script should NOT be run as root (or sudo)!"
+fi
+
+# Check user input
+[[ -z "${1:-}" ]] && print_help
+
+check_ssh_key
+
+case "$1" in
+  help|-h|--help) print_help "$@" ;;
+  prune|prune-all|-p|--prune|--prune-all) prune_all ;;
+  info|repo-info|--info|--repo-info) repo_info "$@" ;;
+  init|init-repos|--init|--init-repos) init_repos ;;
+  list|list-archives|-l|--list|--list-archives) list_repo_archives "$@" ;;
+  mount|mount-archive|-m|--mount|--mount-archive) mount_archive "$@" ;;
+  backup|-b|--backup) borg_backup_full ;;
+  status|-s|--status) print_status ;;
+  *) exit_script_on_failure "Invalid or missing subcommand. Use \`kbh help\` to list subcommands, or read the man page with \`man kbh\`."
+esac
+
