@@ -399,7 +399,7 @@ print_status()
     fi
 
     # If we can connect to repo, print more info (repo size and last backup info)
-    if ! BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}" &> /dev/null; then
+    if ! BORG_PASSPHRASE="$(${passwordCommand})" timeout 8s borg info "${repoPath}" &> /dev/null; then
       printf "%s%s%s (could not connect or find repo)%s\n" "${WHITE}" "${repoName}" "${YELLOW}" "${NC}"
     else
       borgInfoOutput="$(BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}")"
@@ -453,13 +453,13 @@ check_ssh_key
 
 case "$1" in
   help|-h|--help) print_help "$@" ;;
-  prune|prune-all|-p|--prune|--prune-all) prune_all ;;
-  info|repo-info|--info|--repo-info) repo_info "$@" ;;
-  init|init-repos|--init|--init-repos) init_repos ;;
-  list|list-archives|-l|--list|--list-archives) list_repo_archives "$@" ;;
-  mount|mount-archive|-m|--mount|--mount-archive) mount_archive "$@" ;;
-  backup|-b|--backup) borg_backup_full ;;
-  status|-s|--status) print_status ;;
+  prune|prune-all) prune_all ;;
+  info|repo-info) repo_info "$@" ;;
+  init|init-repos) init_repos ;;
+  list|list-archives) list_repo_archives "$@" ;;
+  mount|mount-archive) mount_archive "$@" ;;
+  backup) borg_backup_full ;;
+  status) print_status ;;
   *) exit_script_on_failure "Invalid or missing subcommand. Use \`kbh help\` to list subcommands, or read the man page with \`man kbh\`."
 esac
 
