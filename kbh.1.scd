@@ -10,49 +10,59 @@ kbh *[SUBCOMMAND]* _[args]_
 
 # DESCRIPTION
 
-kbh is a terminal program that uses the borg backup tool to create and manage multiple encrypted borg repositories and archives easily and quickly. kbh provides borg with specified passkey commands to skip password inputs, and you can refer to your repositories with your own easy-to-remember names.
+kbh is a terminal program that uses JSON and the borg backup tool to manage multiple encrypted borg repositories and archives easily and quickly. kbh provides borg with specified passkey commands to skip password inputs, and you can refer to your repositories with your own easy-to-remember names.
 
 You must have a configuration file specifying backup and repository information. All commands will use information from this configuration file. See *CONFIG FILE* below for more information.
 
 # SUBCOMMANDS
 
-*status*
-	Displays the current configuration of kbh and the configuration and status of all defined repositories. 
-
 *backup*
-	Creates a full borg backup of all backup path directories to all repositories.
+	Creates a borg archive ("borg create ...") of all backup path directories to a repository (or multiple repositories). If no repository is specified, an archive will be created on all repositories.
 
-	e.g. kbh *backup*
+	e.g. kbh *backup*++
+e.g. kbh *backup* _home-server_ _nas_
+
+*delete* _repo-name_ _archive-name_
+	Deletes an archive in a repository ("borg delete ...").
+
+	e.g. kbh *delete* _home-server_ _2024-05-13-201415_
 
 *info*
-	Displays the repository information ("borg info ...") for all repositories. Optionally you may specify a repository to display information only for that repository.
+	Displays the repository information ("borg info ...") for a repository (or multiple repositories). If no repository is specified, information for all repositories will be displayed.
 
 	e.g. kbh *info*++
 e.g. kbh *info* _home-server_
 
+*init*
+	Creates all repositories as defined in the configuration file ("borg init ..."). kbh will encrypt all repositories with "--encryption repokey-blake2" and prompt for a key. Afterwards, kbh will display the output of "borg key export ..." for every repository created.
+
+	e.g. kbh *init*
+
 *list*
-	Lists all archives ("borg list ...") in all repositories. Optionally you may specify a repository to list archives only from that repository.
+	Lists all archives ("borg list ...") in a repository (or multiple repositories). If no repository is specified, archives from all repositories will be listed.
 
 	e.g. kbh *list*++
 e.g. kbh *list* _home-server_
 
-*mount*
-	Mounts an archive from a specified repository or the full repository. If no mount point is defined in the configuration file, *mount* will default to /mnt/borg. You may override the mount point with the environment variable KBH_MOUNTPOINT. If no archive is given, *mount* will mount the entire repository.
+*mount* _repo-name_
+	Mounts an entire repository, or an archive from a specified repository ("borg mount ..."). If no mount point is defined in the configuration file, *mount* will default to /mnt/borg. You may override the mount point with the environment variable KBH_MOUNTPOINT.
 
 	e.g. kbh *mount* _home-server_++
-e.g. kbh *mount* _home-server May-02-2024-14-23-22_
-
-*init*
-	Creates all repositories as defined in the configuration file. kbh will encrypt all repositories with "--encryption repokey-blake2" and prompt for a key. Afterwards, kbh will display the output of "borg key export ..." for every repository created.
-
-	e.g. kbh *init*
+e.g. kbh *mount* _home-server May-02-2024-14-23-22_++
+e.g. KBH_MOUNTPOINT=/mnt/new/path kbh *mount* _home-server_ _2024-05-13-201415_
 
 *prune*
-	Prunes either a specified repository or, if no repository specified, all repositories according to the configuration's prune command. If no prune command is specified, *prune* will default to "borg prune -v --list --keep-daily=7 --keep-weekly=-1". This command will keep the latest backup on each day, up to 7 most recent days with backups, in addition to keeping the latest backup from each week for all time (no limit on weekly backups).++
-  After pruning, kbh will run "borg compact" to free up disk space.
+	Prunes a specified repository (or multiple repositories) ("borg prune ..."). If no repository is specified, all repositories will be pruned.
+
+	If no prune command is specified in the configuration file, *prune* will default to "borg prune -v --list --keep-daily=7 --keep-weekly=-1". This command will keep the latest backup on each day, up to 7 most recent days with backups, in addition to keeping the latest backup from each week for all time (no limit on weekly backups).
+
+	After pruning, kbh will run "borg compact" to free up disk space.
 
 	e.g. kbh *prune*++
-e.g. kbh *prune* _home-server_
+e.g. kbh *prune* _nas_ _home-server_
+
+*status*
+	Displays the current configuration of kbh and the configuration and status of all defined repositories. Repository size and last archive date are fetched from the repository.
 
 # CONFIG FILE
 
@@ -98,7 +108,7 @@ Here is an example configuration file:
 
 # BUGS
 
-Please file requests and report any bugs at: https://github.com/krathalan/miscellaneous-scripts
+Please file requests and report any bugs at: https://github.com/krathalan/kbh
 
 *If you are reporting a bug, please attach a debug log.*
 

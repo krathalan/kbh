@@ -44,16 +44,17 @@ Continuing the example, the config for the above command would look something li
 ### Subcommands
 
 Implements most common borg subcommands as the same subcommand name, such as:
+- backup (`borg create ...`)
+- delete
 - init
-- create (`kbh backup`)
 - info
 - list
 - mount
 - prune
 
 Additional kbh-only commands:
-- status
 - help
+- status
 
 Most kbh commands will work either with no arguments (performs subcommand on all repos) or by specifying repo (and optionally archive for some commands, like `kbh mount`).
 
@@ -63,7 +64,7 @@ See the [`man page`](kbh.1.scd) for more information, including usage examples, 
 
 kbh will attempt to sanity check most commands -- for example, `kbh mount` will check to make sure (1) your mount directory exists, and (2) that something isn't already mounted on that directory.
 
-However, apart from ensuring your configuration is a valid JSON file, kbh will NOT attempt to sanity check any of the values you have put in. For example, kbh will NOT check the names you have defined for your repositories are unique. For example, if you have two repositories with the same name or two repositories which share an alternative name, 
+However, apart from ensuring your configuration is a valid JSON file, kbh will NOT attempt to sanity check any of the values you have put in. For example, kbh will NOT check the names you have defined for your repositories are unique.
 
 ## Install
 
