@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Description: Krathalan's Borg Helper: makes managing borg backups and repos
-#              dead simple.
+#              braindead easy with JSON configuration.
 
 # -----------------------------------------
 # -------------- Guidelines ---------------
@@ -231,54 +231,75 @@ print_help()
   printf "%s" "\
 ${SCRIPT_NAME} - Krath's Borg Helper
 
-More detailed usage information, including configuration, flags and override variables, is found in the man page.
+More detailed usage information, including configuration and override
+variables, is found in the man page.
 
 => help|-h|--help - show this help
 => backup         - backs up all backup directories
+=> delete         - deletes archive from repo
 => info           - lists borg repos general information
 => list           - lists archives from borg repos
 => init           - initializes borg repos
-=> prune          - prunes archives according to config setting
 => mount          - mounts repo or archive from specified repo onto /mnt/borg
-                      usage: ${SCRIPT_NAME} mount \$reponame \$archivename
-=> delete         - deletes archive from repo
-                      usage: ${SCRIPT_NAME} delete \$reponame \$archivename
+=> prune          - prunes archives according to config setting
 "
 
   exit 0
 }
 
-backup()
+backup_helper()
 {
-  local whileCounter=0
-  local repoName=""
-  local repoPath=""
-  local passwordCommand=""
-  local repoCompression=""
+  local -r repoName="$(jaq -r .name <<< "$1")"
+  local -r repoPath="$(jaq -r .path <<< "$1")"
+  local -r passwordCommand="$(jaq -r .password_command <<< "$1")"
   local -r archiveName="$(${KBH_ARCHIVE_NAME})"
 
+  local backupPaths
   mapfile -t backupPaths <<< "$(jaq -r .backup_paths[] <<< "${KBH_SETTINGS_JSON}")"
+  readonly backupPaths
 
-  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
-    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
-    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
-    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
-    repoCompression="$(jaq -r .repos[${whileCounter}].compression <<< "${KBH_SETTINGS_JSON}")"
+  local repoCompression
+  repoCompression="$(jaq -r .compression <<< "$1")"
+  if [[ "${repoCompression}" == "null" ]]; then
+    # Use default borg compression
+    repoCompression="lz4"
+  fi
+  readonly repoCompression
 
-    if [[ "${repoCompression}" == "null" ]]; then
-      # Use default borg compression
-      repoCompression="lz4"
-    fi
-    
-    print_script_message "Backing up files to ${repoName}..."
-    printf "Running command: borg create --compression %s --stats --progress %s::%s %s\n\n" "${repoCompression}" "${repoPath}" "${archiveName}" "${backupPaths[*]}"
+  print_script_message "Backing up files to ${repoName}..."
+  printf "Running command: borg create --compression %s --stats --progress %s::%s %s\n\n" "${repoCompression}" "${repoPath}" "${archiveName}" "${backupPaths[*]}"
 
-    BORG_PASSPHRASE="$(${passwordCommand})" borg create --compression "${repoCompression}" --stats --progress "${repoPath}"::"${archiveName}" "${backupPaths[@]}"
+  BORG_PASSPHRASE="$(${passwordCommand})" borg create --compression "${repoCompression}" --stats --progress "${repoPath}"::"${archiveName}" "${backupPaths[@]}"
+}
 
-    printf "\n"
+# $1: repo (optional)
+backup()
+{
+  shift
+  local repoData=""
 
-    whileCounter="$(( whileCounter + 1 ))"
-  done
+  # If repo specified, backup only to that repo
+  if [[ $# -gt 0 ]]; then
+    while [[ $# -gt 0 ]]; do
+      repoData="$(select_repo_by_name "$1")"
+      backup_helper "${repoData}"
+
+      printf "\n"
+      shift
+    done
+  else
+    # If repo not specified, backup to all repos
+    print_script_message "Backing up to all repos."
+
+    local whileCounter=0
+    while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+      repoData="$(select_repo_by_index "${whileCounter}")"
+      backup_helper "${repoData}"
+
+      whileCounter="$(( whileCounter + 1 ))"
+      printf "\n"
+    done
+  fi
 }
 
 prune_repos()
