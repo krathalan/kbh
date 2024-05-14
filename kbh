@@ -90,6 +90,25 @@ print_script_message()
   printf "%s==>%s %s%s\n" "${GREEN}" "${WHITE}" "$1" "${NC}"
 }
 
+get_mount_point()
+{
+  local -r mountPointSetting="$(jaq -r .mount_point <<< "${KBH_SETTINGS_JSON}")"
+
+  # Discern where to mount
+  # If KBH_MOUNTPOINT env variable is specified, use that first.
+  # Otherwise use value of .mount_point in conf file.
+  # Otherwise default to /mnt/borg.
+  if [[ -n "${KBH_MOUNTPOINT:-}" ]]; then
+    local -r mountPointOfficial="${KBH_MOUNTPOINT}"
+  elif [[ -n "${mountPointSetting}" ]]; then
+    local -r mountPointOfficial="${mountPointSetting}"
+  else
+    local -r mountPointOfficial="/mnt/borg"
+  fi
+
+  printf "%s" "${mountPointOfficial}"
+}
+
 # $1: name (or alternative name) of repo to return json data of
 select_repo_by_name()
 {
@@ -227,55 +246,40 @@ repo_info()
   fi
 }
 
+list_repo_archives_helper()
+{
+  local -r repoName="$(jaq -r .name <<< "$1")"
+  local -r repoPath="$(jaq -r .path <<< "$1")"
+  local -r passwordCommand="$(jaq -r .password_command <<< "$1")"
+  
+  print_script_message "Repo archives on ${repoName}..."
+
+  BORG_PASSPHRASE="$(${passwordCommand})" borg list "${repoPath}"
+}
+
 # $1: repo (optional)
 list_repo_archives()
 {
   shift
+  local repoData=""
 
-  local repoName=""
-  local repoPath=""
-  local passwordCommand=""
-  local whileCounter=0
-
-  # If no argument, list repo archives for all repos.
-  if [[ $# == 0 ]]; then
+  # If repo specified, print archives for only that repo
+  if [[ $# -gt 0 ]]; then
+    repoData="$(select_repo_by_name "$1")"
+    list_repo_archives_helper "${repoData}"
+  else
+    # If repo not specified, print archives for all repos
     print_script_message "Listing repo archives."
 
+    local whileCounter=0
     while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
-      repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
-      repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
-      passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
-      
-      print_script_message "Repo archives on ${repoName}..."
-
-      BORG_PASSPHRASE="$(${passwordCommand})" borg list "${repoPath}"
+      repoData="$(select_repo_by_index "${whileCounter}")"
+      list_repo_archives_helper "${repoData}"
 
       whileCounter="$(( whileCounter + 1 ))"
       printf "\n"
     done
-
-    return
   fi
-
-  # If argument given, list specific repo archives.
-  local repoData
-  repoData="$(jaq -r ".repos[] | select(.name==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
-
-  # Attempt to match repo from alternative names
-  if [[ -z "${repoData:-}" ]]; then
-    repoData="$(jaq -r ".repos[] | select(.alternative_names[]==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
-  fi
-
-  if [[ -z "${repoData:-}" ]]; then
-    exit_script_on_failure "Could not locate repo with name or alternative name \"$1\""
-  fi
-
-  repoName="$(jaq -r .name <<< "${repoData}")"
-  repoPath="$(jaq -r .path <<< "${repoData}")"
-  passwordCommand="$(jaq -r .password_command <<< "${repoData}")"
-
-  print_script_message "Repo archives on ${repoName}..."
-  BORG_PASSPHRASE="$(${passwordCommand})" borg list "${repoPath}"
 }
 
 # no arguments
@@ -365,16 +369,16 @@ ${SCRIPT_NAME} - Krath's Borg Helper
 
 More detailed usage information, including configuration, flags and override variables, is found in the man page.
 
-=> help|-h|--help                                 - show this help
-=> backup|--backup                                - backs up all backup directories to all repos
-=> info|repo-info|--info|--repo-info              - lists borg repos general information
-=> list|list-archives|-l|--list|--list-archives   - lists archives from borg repos
-=> init|init-repos|--init|--init-repos            - creates borg repos
-=> mount|mount-archive|-m|--mount|--mount-archive - mounts repo or archive from specified repo onto /mnt/borg
-                                          usage: ${SCRIPT_NAME} mount \${repo/host} \${optional archive name}
-                                          e.g.   ${SCRIPT_NAME} mount alpha May-02-2024-14-23-22
-=> prune|prune-all|-p|--prune|--prune-all         - removes all archives older than 1 day from
-                                                    all borg repos
+=> help|-h|--help - show this help
+=> backup         - backs up all backup directories
+=> info           - lists borg repos general information
+=> list           - lists archives from borg repos
+=> init           - initializes borg repos
+=> prune          - prunes archives according to config setting
+=> mount          - mounts repo or archive from specified repo onto /mnt/borg
+                      usage: ${SCRIPT_NAME} mount \$reponame \$archivename
+=> delete         - deletes archive from repo
+                      usage: ${SCRIPT_NAME} delete \$reponame \$archivename
 "
 
   exit 0
@@ -437,25 +441,6 @@ print_status()
 
     whileCounter="$(( whileCounter + 1 ))"
   done
-}
-
-get_mount_point()
-{
-  local -r mountPointSetting="$(jaq -r .mount_point <<< "${KBH_SETTINGS_JSON}")"
-
-  # Discern where to mount
-  # If KBH_MOUNTPOINT env variable is specified, use that first.
-  # Otherwise use value of .mount_point in conf file.
-  # Otherwise default to /mnt/borg.
-  if [[ -n "${KBH_MOUNTPOINT:-}" ]]; then
-    local -r mountPointOfficial="${KBH_MOUNTPOINT}"
-  elif [[ -n "${mountPointSetting}" ]]; then
-    local -r mountPointOfficial="${mountPointSetting}"
-  else
-    local -r mountPointOfficial="/mnt/borg"
-  fi
-
-  printf "%s" "${mountPointOfficial}"
 }
 
 delete()
