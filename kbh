@@ -142,72 +142,6 @@ select_repo_by_index()
   printf "%s" "${repoData}"
 }
 
-# no arguments
-borg_backup_full()
-{
-  local whileCounter=0
-  local repoName=""
-  local repoPath=""
-  local passwordCommand=""
-  local repoCompression=""
-  local -r archiveName="$(${KBH_ARCHIVE_NAME})"
-
-  mapfile -t backupPaths <<< "$(jaq -r .backup_paths[] <<< "${KBH_SETTINGS_JSON}")"
-
-  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
-    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
-    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
-    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
-    repoCompression="$(jaq -r .repos[${whileCounter}].compression <<< "${KBH_SETTINGS_JSON}")"
-
-    if [[ "${repoCompression}" == "null" ]]; then
-      # Use default borg compression
-      repoCompression="lz4"
-    fi
-    
-    print_script_message "Backing up files to ${repoName}..."
-    printf "Running command: borg create --compression %s --stats --progress %s::%s %s\n\n" "${repoCompression}" "${repoPath}" "${archiveName}" "${backupPaths[*]}"
-
-    BORG_PASSPHRASE="$(${passwordCommand})" borg create --compression "${repoCompression}" --stats --progress "${repoPath}"::"${archiveName}" "${backupPaths[@]}"
-
-    printf "\n"
-
-    whileCounter="$(( whileCounter + 1 ))"
-  done
-}
-
-# no arguments
-prune_all()
-{
-  printf "%s==> Removing all archives on all repos not within the last day in 15 seconds.\n%sPress CTRL+C to cancel.%s\n" "${RED}" "${NC}" "${WHITE}"
-  
-  local whileCounter=0
-  while [[ "${whileCounter}" -lt 15 ]]; do
-    sleep 1
-    printf "."
-    whileCounter="$(( whileCounter + 1 ))"
-  done
-
-  printf "%s" "${NC}"
-
-  whileCounter=0
-  local repoName=""
-  local repoPath=""
-  local passwordCommand=""
-
-  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
-    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
-    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
-    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
-    
-    print_script_message "Pruning archives on ${repoName}..."
-
-    BORG_PASSPHRASE="$(${passwordCommand})" borg prune -v --list --keep-within=1d "${repoPath}"
-
-    whileCounter="$(( whileCounter + 1 ))"
-  done
-}
-
 # $1: repo data as json element
 # Takes repo data as a json element and prints repo info
 repo_info_helper()
@@ -229,8 +163,13 @@ repo_info()
 
   # If repo specified, print info for only that repo
   if [[ $# -gt 0 ]]; then
-    repoData="$(select_repo_by_name "$1")"
-    repo_info_helper "${repoData}"
+    while [[ $# -gt 0 ]]; do
+      repoData="$(select_repo_by_name "$1")"
+      repo_info_helper "${repoData}"
+
+      printf "\n"
+      shift
+    done
   else
     # If repo not specified, print info for all repos
     print_script_message "Listing repo info."
@@ -265,8 +204,13 @@ list_repo_archives()
 
   # If repo specified, print archives for only that repo
   if [[ $# -gt 0 ]]; then
-    repoData="$(select_repo_by_name "$1")"
-    list_repo_archives_helper "${repoData}"
+    while [[ $# -gt 0 ]]; do
+      repoData="$(select_repo_by_name "$1")"
+      list_repo_archives_helper "${repoData}"
+
+      printf "\n"
+      shift
+    done
   else
     # If repo not specified, print archives for all repos
     print_script_message "Listing repo archives."
@@ -280,6 +224,92 @@ list_repo_archives()
       printf "\n"
     done
   fi
+}
+
+print_help()
+{
+  printf "%s" "\
+${SCRIPT_NAME} - Krath's Borg Helper
+
+More detailed usage information, including configuration, flags and override variables, is found in the man page.
+
+=> help|-h|--help - show this help
+=> backup         - backs up all backup directories
+=> info           - lists borg repos general information
+=> list           - lists archives from borg repos
+=> init           - initializes borg repos
+=> prune          - prunes archives according to config setting
+=> mount          - mounts repo or archive from specified repo onto /mnt/borg
+                      usage: ${SCRIPT_NAME} mount \$reponame \$archivename
+=> delete         - deletes archive from repo
+                      usage: ${SCRIPT_NAME} delete \$reponame \$archivename
+"
+
+  exit 0
+}
+
+backup()
+{
+  local whileCounter=0
+  local repoName=""
+  local repoPath=""
+  local passwordCommand=""
+  local repoCompression=""
+  local -r archiveName="$(${KBH_ARCHIVE_NAME})"
+
+  mapfile -t backupPaths <<< "$(jaq -r .backup_paths[] <<< "${KBH_SETTINGS_JSON}")"
+
+  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
+    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
+    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
+    repoCompression="$(jaq -r .repos[${whileCounter}].compression <<< "${KBH_SETTINGS_JSON}")"
+
+    if [[ "${repoCompression}" == "null" ]]; then
+      # Use default borg compression
+      repoCompression="lz4"
+    fi
+    
+    print_script_message "Backing up files to ${repoName}..."
+    printf "Running command: borg create --compression %s --stats --progress %s::%s %s\n\n" "${repoCompression}" "${repoPath}" "${archiveName}" "${backupPaths[*]}"
+
+    BORG_PASSPHRASE="$(${passwordCommand})" borg create --compression "${repoCompression}" --stats --progress "${repoPath}"::"${archiveName}" "${backupPaths[@]}"
+
+    printf "\n"
+
+    whileCounter="$(( whileCounter + 1 ))"
+  done
+}
+
+prune_repos()
+{
+  printf "%s==> Removing all archives on all repos not within the last day in 15 seconds.\n%sPress CTRL+C to cancel.%s\n" "${RED}" "${NC}" "${WHITE}"
+  
+  local whileCounter=0
+  while [[ "${whileCounter}" -lt 15 ]]; do
+    sleep 1
+    printf "."
+    whileCounter="$(( whileCounter + 1 ))"
+  done
+
+  printf "%s" "${NC}"
+
+  whileCounter=0
+  local repoName=""
+  local repoPath=""
+  local passwordCommand=""
+
+  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
+    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
+    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
+    
+    print_script_message "Pruning archives on ${repoName}..."
+
+    BORG_PASSPHRASE="$(${passwordCommand})" borg prune -v --list --keep-within=1d "${repoPath}"
+
+    whileCounter="$(( whileCounter + 1 ))"
+  done
 }
 
 # no arguments
@@ -362,28 +392,6 @@ mount_archive()
   fi
 }
 
-print_help()
-{
-  printf "%s" "\
-${SCRIPT_NAME} - Krath's Borg Helper
-
-More detailed usage information, including configuration, flags and override variables, is found in the man page.
-
-=> help|-h|--help - show this help
-=> backup         - backs up all backup directories
-=> info           - lists borg repos general information
-=> list           - lists archives from borg repos
-=> init           - initializes borg repos
-=> prune          - prunes archives according to config setting
-=> mount          - mounts repo or archive from specified repo onto /mnt/borg
-                      usage: ${SCRIPT_NAME} mount \$reponame \$archivename
-=> delete         - deletes archive from repo
-                      usage: ${SCRIPT_NAME} delete \$reponame \$archivename
-"
-
-  exit 0
-}
-
 # Print config and overall repo info
 print_status()
 {
@@ -464,12 +472,12 @@ check_ssh_key
 
 case "$1" in
   help|-h|--help) print_help "$@" ;;
-  prune) prune_all ;;
+  prune) prune_repos "$@" ;;
   info) repo_info "$@" ;;
   init) init_repos ;;
   list) list_repo_archives "$@" ;;
   mount) mount_archive "$@" ;;
-  backup) borg_backup_full ;;
+  backup) backup "$@" ;;
   delete) delete "$@" ;;
   status) print_status ;;
   *) exit_script_on_failure "Invalid or missing subcommand. Use \`kbh help\` to list subcommands, or read the man page with \`man kbh\`."
