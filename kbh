@@ -90,8 +90,7 @@ print_script_message()
   printf "%s==>%s %s%s\n" "${GREEN}" "${WHITE}" "$1" "${NC}"
 }
 
-# $1: name (or alternative name) of repo
-# Selects a repo from the config by name and returns the json info for that element
+# $1: name (or alternative name) of repo to return json data of
 select_repo_by_name()
 {
   # Attempt to match repo from name
@@ -106,6 +105,19 @@ select_repo_by_name()
   # Crash if repo not found
   if [[ -z "${repoData:-}" ]]; then
     exit_script_on_failure "Could not locate repo with name or alternative name \"$1\""
+  fi
+
+  printf "%s" "${repoData}"
+}
+
+# $1: index of repo to return json data of
+select_repo_by_index()
+{
+  local repoData
+  repoData="$(jaq -r ".repos[$1]" <<< "${KBH_SETTINGS_JSON}")"
+
+  if [[ "${repoData}" == "null" ]]; then
+    exit_script_on_failure "Could not locate repo with index $1 in config file"
   fi
 
   printf "%s" "${repoData}"
@@ -177,55 +189,42 @@ prune_all()
   done
 }
 
+# $1: repo data as json element
+# Takes repo data as a json element and prints repo info
+repo_info_helper()
+{
+  local -r repoName="$(jaq -r .name <<< "$1")"
+  local -r repoPath="$(jaq -r .path <<< "$1")"
+  local -r passwordCommand="$(jaq -r .password_command <<< "$1")"
+  
+  print_script_message "Repo info on ${repoName}..."
+
+  BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}"
+}
+
 # $1: repo (optional)
 repo_info()
 {
   shift
+  local repoData=""
 
-  local repoName=""
-  local repoPath=""
-  local passwordCommand=""
-  local whileCounter=0
-
-  # If no argument, list repo info for all repos.
-  if [[ $# == 0 ]]; then
+  # If repo specified, print info for only that repo
+  if [[ $# -gt 0 ]]; then
+    repoData="$(select_repo_by_name "$1")"
+    repo_info_helper "${repoData}"
+  else
+    # If repo not specified, print info for all repos
     print_script_message "Listing repo info."
 
+    local whileCounter=0
     while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
-      repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
-      repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
-      passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
-      
-      print_script_message "Repo info on ${repoName}..."
-
-      BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}"
+      repoData="$(select_repo_by_index "${whileCounter}")"
+      repo_info_helper "${repoData}"
 
       whileCounter="$(( whileCounter + 1 ))"
       printf "\n"
     done
-
-    return
   fi
-
-  # If argument given, list specific repo info.
-  local repoData
-  repoData="$(jaq -r ".repos[] | select(.name==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
-
-  # Attempt to match repo from alternative names
-  if [[ -z "${repoData:-}" ]]; then
-    repoData="$(jaq -r ".repos[] | select(.alternative_names[]==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
-  fi
-
-  if [[ -z "${repoData:-}" ]]; then
-    exit_script_on_failure "Could not locate repo with name or alternative name \"$1\""
-  fi
-
-  repoName="$(jaq -r .name <<< "${repoData}")"
-  repoPath="$(jaq -r .path <<< "${repoData}")"
-  passwordCommand="$(jaq -r .password_command <<< "${repoData}")"
-
-  print_script_message "Repo info on ${repoName}..."
-  BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}"
 }
 
 # $1: repo (optional)
@@ -462,6 +461,7 @@ get_mount_point()
 delete()
 {
   # NYI
+  true
 }
 
 # -----------------------------------------
