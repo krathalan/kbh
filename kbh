@@ -76,6 +76,7 @@ variables, is found in the man page.
 => init           - initializes borg repos
 => mount          - mounts repo or archive from specified repo onto /mnt/borg
 => prune          - prunes archives according to config setting
+=> status         - displays config and status of all repos
 "
 
   exit 0
@@ -489,9 +490,10 @@ print_status()
       printf "%s%s%s (could not connect or find repo)%s\n" "${WHITE}" "${repoName}" "${YELLOW}" "${NC}"
     else
       borgInfoOutput="$(BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}")"
-      lastArchive="$(BORG_PASSPHRASE="$(${passwordCommand})" borg list "${repoPath}" | tail -n1 | tr -s " ")"
+      borgListOutput="$(BORG_PASSPHRASE="$(${passwordCommand})" borg list "${repoPath}")"
+      lastArchive="$(printf "%s" "${borgListOutput}" | tail -n1 | tr -s " ")"
 
-      printf "%s%s%s (%s %s)\n" "${WHITE}" "${repoName}" "${NC}" "$(printf "%s" "${borgInfoOutput}" | grep 'All archives' | awk '{print $7}')" "$(printf "%s" "${borgInfoOutput}" | grep 'All archives' | awk '{print $8}')"
+      printf "%s%s%s (%s %s, %s archives)\n" "${WHITE}" "${repoName}" "${NC}" "$(printf "%s" "${borgInfoOutput}" | grep 'All archives' | awk '{print $7}')" "$(printf "%s" "${borgInfoOutput}" | grep 'All archives' | awk '{print $8}')" "$(printf "%s\n" "${borgListOutput}" | wc -l)"
       printf "  Last backup: %s\n" "${lastArchive% *}"
     fi
 
