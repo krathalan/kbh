@@ -60,6 +60,27 @@ readonly KBH_SETTINGS_JSON KBH_REPOS_NUMBER KBH_ARCHIVE_NAME SCRIPT_NAME GREEN R
 # --------------- Functions ---------------
 # -----------------------------------------
 
+print_help()
+{
+  printf "%s" "\
+${SCRIPT_NAME} - Krath's Borg Helper
+
+More detailed usage information, including configuration and override
+variables, is found in the man page.
+
+=> help|-h|--help - show this help
+=> backup         - backs up all backup directories
+=> delete         - deletes archive from repo
+=> info           - lists borg repos general information
+=> list           - lists archives from borg repos
+=> init           - initializes borg repos
+=> mount          - mounts repo or archive from specified repo onto /mnt/borg
+=> prune          - prunes archives according to config setting
+"
+
+  exit 0
+}
+
 check_ssh_key()
 {
   # Load settings
@@ -142,8 +163,6 @@ select_repo_by_index()
   printf "%s" "${repoData}"
 }
 
-# $1: repo data as json element
-# Takes repo data as a json element and prints repo info
 repo_info_helper()
 {
   local -r repoName="$(jaq -r .name <<< "$1")"
@@ -155,7 +174,7 @@ repo_info_helper()
   BORG_PASSPHRASE="$(${passwordCommand})" borg info "${repoPath}"
 }
 
-# $1: repo (optional)
+# $*: repos (optional)
 repo_info()
 {
   shift
@@ -196,7 +215,7 @@ list_repo_archives_helper()
   BORG_PASSPHRASE="$(${passwordCommand})" borg list "${repoPath}"
 }
 
-# $1: repo (optional)
+# $*: repos (optional)
 list_repo_archives()
 {
   shift
@@ -226,27 +245,6 @@ list_repo_archives()
   fi
 }
 
-print_help()
-{
-  printf "%s" "\
-${SCRIPT_NAME} - Krath's Borg Helper
-
-More detailed usage information, including configuration and override
-variables, is found in the man page.
-
-=> help|-h|--help - show this help
-=> backup         - backs up all backup directories
-=> delete         - deletes archive from repo
-=> info           - lists borg repos general information
-=> list           - lists archives from borg repos
-=> init           - initializes borg repos
-=> mount          - mounts repo or archive from specified repo onto /mnt/borg
-=> prune          - prunes archives according to config setting
-"
-
-  exit 0
-}
-
 backup_helper()
 {
   local -r repoName="$(jaq -r .name <<< "$1")"
@@ -272,7 +270,7 @@ backup_helper()
   BORG_PASSPHRASE="$(${passwordCommand})" borg create --compression "${repoCompression}" --stats --progress "${repoPath}"::"${archiveName}" "${backupPaths[@]}"
 }
 
-# $1: repo (optional)
+# $*: repos (optional)
 backup()
 {
   shift
@@ -302,35 +300,80 @@ backup()
   fi
 }
 
+prune_repos_helper()
+{
+  local -r repoName="$(jaq -r .name <<< "$1")"
+  local -r repoPath="$(jaq -r .path <<< "$1")"
+  local -r passwordCommand="$(jaq -r .password_command <<< "$1")"
+
+  local -r pruneCommandSetting="$(jaq -r .prune_command <<< "${KBH_SETTINGS_JSON}")"
+  local pruneCommandOfficial=""
+
+  # If prune command not specified, use default as stated in man page
+  if [[ "${pruneCommandSetting}" == "null" ]]; then
+    pruneCommandOfficial="borg prune -v --list --keep-daily=30 --keep-weekly=-1"
+  elif [[ -z "${pruneCommandOfficial}" ]]; then
+    pruneCommandOfficial="${pruneCommandSetting}"
+  else
+    exit_script_on_failure "Could not set prune command"
+  fi
+
+  readonly pruneCommandOfficial
+
+  # Do dry run first and prompt for confirmation
+  print_script_message "Doing DRY RUN for pruning archives on ${repoName}..."
+  printf "Running command: %s --dry-run %s\n" "${pruneCommandOfficial}" "${repoPath}"
+  BORG_PASSPHRASE="$(${passwordCommand})" ${pruneCommandOfficial} --dry-run "${repoPath}"
+  
+  printf "\n%sApprove execution of prune command? " "${WHITE}"
+  read -r -p "[y/N]${NC} " response
+
+  case "${response}" in
+    [yY][eE][sS]|[yY])
+      printf "\n"
+      print_script_message "Pruning archives on ${repoName}..."
+      printf "Running command: %s %s\n" "${pruneCommandOfficial}" "${repoPath}"
+      BORG_PASSPHRASE="$(${passwordCommand})" ${pruneCommandOfficial} "${repoPath}"
+
+      printf "\n"
+      print_script_message "Compacting archives on ${repoName}..."
+      printf "Running command: borg compact %s\n" "${repoPath}"
+      BORG_PASSPHRASE="$(${passwordCommand})" borg compact "${repoPath}"
+      ;;
+    *)
+      printf "Cancelling prune command\n"
+      ;;
+  esac
+}
+
+# $*: repos (optional)
 prune_repos()
 {
-  printf "%s==> Removing all archives on all repos not within the last day in 15 seconds.\n%sPress CTRL+C to cancel.%s\n" "${RED}" "${NC}" "${WHITE}"
-  
-  local whileCounter=0
-  while [[ "${whileCounter}" -lt 15 ]]; do
-    sleep 1
-    printf "."
-    whileCounter="$(( whileCounter + 1 ))"
-  done
+  shift
+  local repoData=""
 
-  printf "%s" "${NC}"
+  # If repo specified, prune only that repo
+  if [[ $# -gt 0 ]]; then
+    while [[ $# -gt 0 ]]; do
+      repoData="$(select_repo_by_name "$1")"
+      prune_repos_helper "${repoData}"
 
-  whileCounter=0
-  local repoName=""
-  local repoPath=""
-  local passwordCommand=""
+      printf "\n"
+      shift
+    done
+  else
+    # If repo not specified, prune all repos
+    print_script_message "Pruning all repos."
 
-  while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
-    repoName="$(jaq -r .repos[${whileCounter}].name <<< "${KBH_SETTINGS_JSON}")"
-    repoPath="$(jaq -r .repos[${whileCounter}].path <<< "${KBH_SETTINGS_JSON}")"
-    passwordCommand="$(jaq -r .repos[${whileCounter}].password_command <<< "${KBH_SETTINGS_JSON}")"
-    
-    print_script_message "Pruning archives on ${repoName}..."
+    local whileCounter=0
+    while [[ "${whileCounter}" -lt "${KBH_REPOS_NUMBER}" ]]; do
+      repoData="$(select_repo_by_index "${whileCounter}")"
+      prune_repos_helper "${repoData}"
 
-    BORG_PASSPHRASE="$(${passwordCommand})" borg prune -v --list --keep-within=1d "${repoPath}"
-
-    whileCounter="$(( whileCounter + 1 ))"
-  done
+      whileCounter="$(( whileCounter + 1 ))"
+      printf "\n"
+    done
+  fi
 }
 
 # no arguments
@@ -381,7 +424,7 @@ mount_archive()
 
   local -r mountPoint="$(get_mount_point)"
 
-  # Ensure mount point exists
+  # Ensure directory $mountPoint exists
   if [[ ! -d "${mountPoint}" ]]; then
     exit_script_on_failure "Mount point ${WHITE}${mountPoint}${NC} directory does not exist"
   fi
@@ -392,17 +435,7 @@ mount_archive()
   fi
 
   # Find repo data for specified repo
-  local repoData
-  repoData="$(jaq -r ".repos[] | select(.name==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
-
-  # Attempt to match repo from alternative names
-  if [[ -z "${repoData:-}" ]]; then
-    repoData="$(jaq -r ".repos[] | select(.alternative_names[]==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
-  fi
-
-  if [[ -z "${repoData:-}" ]]; then
-    exit_script_on_failure "Could not locate repo with name or alternative name \"$1\""
-  fi
+  local -r repoData="$(select_repo_by_name "$1")"
 
   # If no archive specified, mount repo
   if [[ -z "${2:-}" ]]; then

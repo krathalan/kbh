@@ -54,7 +54,7 @@ e.g. KBH_MOUNTPOINT=/mnt/new/path kbh *mount* _home-server_ _2024-05-13-201415_
 *prune*
 	Prunes a specified repository (or multiple repositories) ("borg prune ..."). If no repository is specified, all repositories will be pruned.
 
-	If no prune command is specified in the configuration file, *prune* will default to "borg prune -v --list --keep-daily=7 --keep-weekly=-1". This command will keep the latest backup on each day, up to 7 most recent days with backups, in addition to keeping the latest backup from each week for all time (no limit on weekly backups).
+	If no prune command is specified in the configuration file, *prune* will default to "borg prune -v --list --keep-daily=30 --keep-weekly=-1". This command will keep the latest archive on each day, up to 30 most recent days with archives, in addition to keeping the latest archive from each week for all time (no limit on weekly archives).
 
 	After pruning, kbh will run "borg compact" to free up disk space.
 
@@ -79,6 +79,8 @@ Optionally you may specify a command for how you would like kbh to name new arch
 
 Optionally you may specify a command to copy your password for the local ssh key (.ssh_key_password_copy_command), if you are accessing repos over ssh. kbh will check the output of the *ssh-add -L* command; if no key is present, then *ssh-add* will be ran with no arguments.
 
+Optionally you may specify a command for how you would like to prune your repositories (.prune_command). *kbh prune ...* will use this command for pruning your repositories.
+
 Here is an example configuration file:
 
 	_~/.config/krathalan/kbh.json_
@@ -86,6 +88,7 @@ Here is an example configuration file:
 {
   "borg_archive_name_command": "date +%Y-%m-%d-%H%M%S",
   "ssh_key_password_copy_command": "pash c cryptkeys/ssh-desktop",
+  "prune_command": "borg prune -v --list --keep-weekly=16 --keep-monthly=-1",
   "mount_point": "/mnt/borg",
   "backup_paths": ["/home/anders/documents", "/home/anders/pictures"],
   "repos": [
