@@ -1,7 +1,7 @@
 # kbh
 **K**rathalan's **B**org **H**elper
 
-WARNING: IN DEVELOPMENT, all Readme/man page info may NOT match what the code actually does!!!
+**WARNING: IN DEVELOPMENT, all Readme/man page info may NOT match what the code actually does!**
 
 JSON-based, config-driven manager for easily managing multiple borg repositories. You define paths to backup, repositories with individual BORG_PASSPHRASE and compression settings, and more.
 

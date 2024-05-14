@@ -16,38 +16,38 @@ You must have a configuration file specifying backup and repository information.
 
 # SUBCOMMANDS
 
-*status*, *--status*
+*status*
 	Displays the current configuration of kbh and the configuration and status of all defined repositories. 
 
-*backup*, *--backup*
+*backup*
 	Creates a full borg backup of all backup path directories to all repositories.
 
 	e.g. kbh *backup*
 
-*info*, *--info*, *repo-info*, *--repo-info*
+*info*
 	Displays the repository information ("borg info ...") for all repositories. Optionally you may specify a repository to display information only for that repository.
 
 	e.g. kbh *info*++
 e.g. kbh *info* _home-server_
 
-*list*, *list-archives*, *-l*, *--list*, *--list-archives*
+*list*
 	Lists all archives ("borg list ...") in all repositories. Optionally you may specify a repository to list archives only from that repository.
 
 	e.g. kbh *list*++
 e.g. kbh *list* _home-server_
 
-*mount*, *mount-archive*, *-m*, *--mount*, *--mount-archive*
+*mount*
 	Mounts an archive from a specified repository or the full repository. If no mount point is defined in the configuration file, *mount* will default to /mnt/borg. You may override the mount point with the environment variable KBH_MOUNTPOINT. If no archive is given, *mount* will mount the entire repository.
 
 	e.g. kbh *mount* _home-server_++
 e.g. kbh *mount* _home-server May-02-2024-14-23-22_
 
-*init*, *init-repos*, *--init*, *--init-repos*
+*init*
 	Creates all repositories as defined in the configuration file. kbh will encrypt all repositories with "--encryption repokey-blake2" and prompt for a key. Afterwards, kbh will display the output of "borg key export ..." for every repository created.
 
 	e.g. kbh *init*
 
-*prune*, *-p*, *--prune*
+*prune*
 	Prunes either a specified repository or, if no repository specified, all repositories according to the configuration's prune command. If no prune command is specified, *prune* will default to "borg prune -v --list --keep-daily=7 --keep-weekly=-1". This command will keep the latest backup on each day, up to 7 most recent days with backups, in addition to keeping the latest backup from each week for all time (no limit on weekly backups).++
   After pruning, kbh will run "borg compact" to free up disk space.
 

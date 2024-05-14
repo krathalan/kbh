@@ -90,6 +90,27 @@ print_script_message()
   printf "%s==>%s %s%s\n" "${GREEN}" "${WHITE}" "$1" "${NC}"
 }
 
+# $1: name (or alternative name) of repo
+# Selects a repo from the config by name and returns the json info for that element
+select_repo_by_name()
+{
+  # Attempt to match repo from name
+  local repoData
+  repoData="$(jaq -r ".repos[] | select(.name==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
+
+  # If not found, attempt to match repo from alternative names
+  if [[ -z "${repoData:-}" ]]; then
+    repoData="$(jaq -r ".repos[] | select(.alternative_names[]==\"$1\")" <<< "${KBH_SETTINGS_JSON}")"
+  fi
+
+  # Crash if repo not found
+  if [[ -z "${repoData:-}" ]]; then
+    exit_script_on_failure "Could not locate repo with name or alternative name \"$1\""
+  fi
+
+  printf "%s" "${repoData}"
+}
+
 # no arguments
 borg_backup_full()
 {
@@ -438,6 +459,11 @@ get_mount_point()
   printf "%s" "${mountPointOfficial}"
 }
 
+delete()
+{
+  # NYI
+}
+
 # -----------------------------------------
 # ---------------- Script -----------------
 # -----------------------------------------
@@ -453,12 +479,13 @@ check_ssh_key
 
 case "$1" in
   help|-h|--help) print_help "$@" ;;
-  prune|prune-all) prune_all ;;
-  info|repo-info) repo_info "$@" ;;
-  init|init-repos) init_repos ;;
-  list|list-archives) list_repo_archives "$@" ;;
-  mount|mount-archive) mount_archive "$@" ;;
+  prune) prune_all ;;
+  info) repo_info "$@" ;;
+  init) init_repos ;;
+  list) list_repo_archives "$@" ;;
+  mount) mount_archive "$@" ;;
   backup) borg_backup_full ;;
+  delete) delete "$@" ;;
   status) print_status ;;
   *) exit_script_on_failure "Invalid or missing subcommand. Use \`kbh help\` to list subcommands, or read the man page with \`man kbh\`."
 esac
